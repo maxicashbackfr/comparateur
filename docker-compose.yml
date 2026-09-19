@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gcb
+      POSTGRES_PASSWORD: gcb
+      POSTGRES_DB: gcb
+    ports:
+      - "5432:5432"
+    volumes:
+      - gcb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gcb"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  gcb_pgdata:
