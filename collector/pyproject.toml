@@ -1,7 +1,7 @@
 [project]
-name = "gcb-collector"
+name = "maxicash-collector"
 version = "0.1.0"
-description = "GENIUSCASHBACK — collecteur de taux de cashback"
+description = "MAXICASH — collecteur de taux de cashback"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
@@ -18,7 +18,7 @@ dev = ["pytest>=8.0", "ruff>=0.5"]
 playwright = ["playwright>=1.45"]
 
 [project.scripts]
-gcb = "gcb.cli:main"
+maxicash = "maxicash.cli:main"
 
 [build-system]
 requires = ["setuptools>=69"]

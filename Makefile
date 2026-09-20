@@ -10,7 +10,7 @@ down:
 	docker compose down
 
 migrate:
-	cd collector && python -m gcb.cli migrate
+	cd collector && python -m maxicash.cli migrate
 
 test:
 	cd collector && python -m pytest -q
@@ -19,10 +19,10 @@ lint:
 	cd collector && python -m ruff check src tests
 
 discover:
-	cd collector && python -m gcb.cli discover widilo
+	cd collector && python -m maxicash.cli discover widilo
 
 snapshot:
-	cd collector && python -m gcb.cli snapshot widilo $(SLUG)
+	cd collector && python -m maxicash.cli snapshot widilo $(SLUG)
 
 run:
-	cd collector && python -m gcb.cli run widilo --limit $(or $(LIMIT),20)
+	cd collector && python -m maxicash.cli run widilo --limit $(or $(LIMIT),20)

@@ -1,4 +1,4 @@
-# GENIUSCASHBACK — collecteur
+# MAXICASH — collecteur
 
 Socle minimal du MVP (lot L0 réduit) et premier adaptateur de plateforme
 (lot L1, Widilo). Le périmètre, les arbitrages et le découpage en lots sont
@@ -7,14 +7,14 @@ dans **Spécification MVP — Comparateur de cashback + extension**.
 ## Démarrer
 
 ```bash
-cp .env.example .env          # puis renseignez GCB_USER_AGENT (obligatoire)
+cp .env.example .env          # puis renseignez MAXICASH_USER_AGENT (obligatoire)
 make up                       # Postgres local via Docker
 make install                  # installe le collecteur en mode éditable
 make migrate                  # applique db/migrations/*.sql
 make test                     # suite de tests, sans réseau
 ```
 
-`GCB_USER_AGENT` doit contenir une URL de contact joignable. Le collecteur
+`MAXICASH_USER_AGENT` doit contenir une URL de contact joignable. Le collecteur
 refuse de démarrer sans, et c'est voulu : un crawler anonyme est ce qui
 déclenche un blocage.
 
@@ -22,11 +22,11 @@ déclenche un blocage.
 
 | Commande | Effet |
 |---|---|
-| `gcb migrate` | applique les migrations, idempotent |
-| `gcb discover widilo` | énumère les marchands via le sitemap |
-| `gcb snapshot widilo fnac` | fige une page réelle en fixture de test |
-| `gcb run widilo --limit 20` | collecte et écrit en base |
-| `gcb status` | dernières passes, fraîcheur, erreurs |
+| `maxicash migrate` | applique les migrations, idempotent |
+| `maxicash discover widilo` | énumère les marchands via le sitemap |
+| `maxicash snapshot widilo fnac` | fige une page réelle en fixture de test |
+| `maxicash run widilo --limit 20` | collecte et écrit en base |
+| `maxicash status` | dernières passes, fraîcheur, erreurs |
 
 ## La première chose à faire
 
@@ -35,7 +35,7 @@ structure observée du site, pas d'après son balisage réel — je n'ai pas eu
 accès au HTML brut. Elles sont regroupées dans un seul dictionnaire `XPATHS`.
 
 ```bash
-gcb snapshot widilo fnac      # fige la vraie page
+maxicash snapshot widilo fnac      # fige la vraie page
 make test                     # le test sur fixture réelle échoue
 # ajustez XPATHS, relancez jusqu'au vert
 ```
@@ -59,7 +59,7 @@ plutôt que des données silencieusement fausses.
 ```
 db/migrations/     schéma SQL, appliqué dans l'ordre
 collector/
-  src/gcb/
+  src/maxicash/
     config.py      environnement
     types.py       contrat ProviderAdapter, RawMerchant, RawOffer
     http.py        client poli : robots, cadence, cache

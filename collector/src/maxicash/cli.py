@@ -1,10 +1,10 @@
 """CLI du collecteur.
 
-    gcb migrate                     applique les migrations
-    gcb discover widilo             énumère les marchands via le sitemap
-    gcb snapshot widilo fnac        fige une page réelle en fixture de test
-    gcb run widilo --limit 20       collecte et écrit en base
-    gcb status                      dernières passes et fraîcheur
+    maxicash migrate                     applique les migrations
+    maxicash discover widilo             énumère les marchands via le sitemap
+    maxicash snapshot widilo fnac        fige une page réelle en fixture de test
+    maxicash run widilo --limit 20       collecte et écrit en base
+    maxicash status                      dernières passes et fraîcheur
 """
 from __future__ import annotations
 
@@ -175,7 +175,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="gcb", description="Collecteur GENIUSCASHBACK")
+    parser = argparse.ArgumentParser(prog="maxicash", description="Collecteur MAXICASH")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("migrate", help="applique les migrations").set_defaults(func=cmd_migrate)

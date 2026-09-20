@@ -1,6 +1,6 @@
 # Migrations
 
-Un fichier SQL par migration, préfixé d'un numéro. `gcb migrate` les applique
+Un fichier SQL par migration, préfixé d'un numéro. `maxicash migrate` les applique
 dans l'ordre et mémorise les appliquées dans `schema_migrations`.
 
 Règle : on n'édite jamais une migration déjà appliquée en production, on en

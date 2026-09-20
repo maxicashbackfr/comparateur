@@ -3,15 +3,15 @@
 Deux niveaux :
   1. sur fixture synthétique — verrouille la logique, tourne toujours ;
   2. sur fixture réelle — ne tourne que si vous avez lancé
-     `gcb snapshot widilo <slug>`. C'est ce test qui valide les SELECTORS.
+     `maxicash snapshot widilo <slug>`. C'est ce test qui valide les SELECTORS.
 """
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from gcb.adapters.widilo import WidiloAdapter
-from gcb.types import RawMerchant
+from maxicash.adapters.widilo import WidiloAdapter
+from maxicash.types import RawMerchant
 
 FIXTURES = Path(__file__).parent / "fixtures" / "widilo"
 
@@ -64,7 +64,7 @@ def test_les_conditions_sont_rattachees_a_l_offre():
 REAL = sorted(p for p in FIXTURES.glob("*.html") if not p.name.startswith("_"))
 
 
-@pytest.mark.skipif(not REAL, reason="aucune fixture réelle — lancez `gcb snapshot widilo fnac`")
+@pytest.mark.skipif(not REAL, reason="aucune fixture réelle — lancez `maxicash snapshot widilo fnac`")
 @pytest.mark.parametrize("path", REAL, ids=lambda p: p.stem)
 def test_page_reelle_produit_un_taux_d_achat(path):
     """Le test qui compte. Tant qu'il est rouge, les sélecteurs sont faux et

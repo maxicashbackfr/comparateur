@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from gcb.normalize import (
+from maxicash.normalize import (
     classify, compute_effective_value, extract_amounts, parse_offer, to_decimal,
 )
 
@@ -103,7 +103,7 @@ def test_texte_sans_montant_ne_produit_rien():
 
 
 def test_effective_value_ignore_l_unite_mais_pas_le_type():
-    from gcb.types import RawOffer
+    from maxicash.types import RawOffer
 
     fixed = RawOffer(raw_text="20€", value=Decimal("20"), unit="fixed_eur")
     assert compute_effective_value(fixed) == Decimal("20")

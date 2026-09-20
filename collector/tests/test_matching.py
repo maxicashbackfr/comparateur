@@ -1,4 +1,4 @@
-from gcb.matching import best_match, domain_root, normalize_name, slugify
+from maxicash.matching import best_match, domain_root, normalize_name, slugify
 
 
 def test_slugify_supprime_les_accents():

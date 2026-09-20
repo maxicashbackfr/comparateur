@@ -2,17 +2,17 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: gcb
-      POSTGRES_PASSWORD: gcb
-      POSTGRES_DB: gcb
+      POSTGRES_USER: maxicash
+      POSTGRES_PASSWORD: maxicash
+      POSTGRES_DB: maxicash
     ports:
       - "5432:5432"
     volumes:
-      - gcb_pgdata:/var/lib/postgresql/data
+      - maxicash_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gcb"]
+      test: ["CMD-SHELL", "pg_isready -U maxicash"]
       interval: 5s
       retries: 10
 
 volumes:
-  gcb_pgdata:
+  maxicash_pgdata:

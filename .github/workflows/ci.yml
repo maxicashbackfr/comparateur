@@ -13,19 +13,19 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: gcb
-          POSTGRES_PASSWORD: gcb
-          POSTGRES_DB: gcb
+          POSTGRES_USER: maxicash
+          POSTGRES_PASSWORD: maxicash
+          POSTGRES_DB: maxicash
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://gcb:gcb@localhost:5432/gcb
+      DATABASE_URL: postgresql://maxicash:maxicash@localhost:5432/maxicash
       # UA de CI : jamais utilisé pour sortir sur le réseau, les tests
       # tournent exclusivement sur fixtures.
-      GCB_USER_AGENT: GeniusCashbackBot-CI/0.1 (+https://example.invalid/bot)
+      MAXICASH_USER_AGENT: MaxiCashBot-CI/0.1 (+https://example.invalid/bot)
 
     steps:
       - uses: actions/checkout@v4
@@ -45,11 +45,11 @@ jobs:
 
       - name: Migrations
         working-directory: collector
-        run: python -m gcb.cli migrate
+        run: python -m maxicash.cli migrate
 
       - name: Vérifier que les migrations sont idempotentes
         working-directory: collector
-        run: python -m gcb.cli migrate
+        run: python -m maxicash.cli migrate
 
       - name: Tests
         working-directory: collector

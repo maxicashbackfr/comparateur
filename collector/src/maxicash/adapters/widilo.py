@@ -19,7 +19,7 @@ Ce que l'inspection du site a établi (19/09/2026) :
   doivent être distingués, sans quoi le comparateur affiche n'importe quoi.
 
 XPATHS ci-dessous est le SEUL endroit à ajuster quand le DOM change. Lancez
-`gcb snapshot widilo fnac` pour figer une page réelle en fixture, puis
+`maxicash snapshot widilo fnac` pour figer une page réelle en fixture, puis
 `pytest tests/test_widilo.py` : le test reste rouge tant que les expressions
 ne sont pas justes — c'est exactement ce qu'on veut, plutôt que des données
 silencieusement fausses.
