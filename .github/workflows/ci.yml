@@ -25,7 +25,7 @@ jobs:
       DATABASE_URL: postgresql://maxicash:maxicash@localhost:5432/maxicash
       # UA de CI : jamais utilisé pour sortir sur le réseau, les tests
       # tournent exclusivement sur fixtures.
-      MAXICASH_USER_AGENT: MaxiCashBot-CI/0.1 (+https://example.invalid/bot)
+      MAXICASH_USER_AGENT: MaxiCashBot-CI/0.1 (+https://maxicash.fr/bot)
 
     steps:
       - uses: actions/checkout@v4
