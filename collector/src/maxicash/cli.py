@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from rich.console import Console
 from rich.table import Table
@@ -27,8 +28,23 @@ console = Console()
 ANOMALY_THRESHOLD = 0.20
 
 
+# Une base hors de la machine locale est, par construction, partagée : la
+# branche `dev` de Neon sert à plusieurs postes. Appliquer des migrations
+# dessus par réflexe est le genre d'accident qu'on ne voit qu'après coup.
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
+    host = urlsplit(settings.database_url).hostname or "?"
+    if host not in LOCAL_HOSTS and not args.yes:
+        console.print(f"[yellow]Base distante :[/] {host}")
+        if not sys.stdin.isatty():
+            console.print("[red]Refus : base distante sans --yes hors mode interactif.[/]")
+            return 1
+        if input("Appliquer les migrations ? [oui/non] ").strip().lower() != "oui":
+            console.print("[dim]Annulé.[/]")
+            return 1
     with db.connect(settings) as conn:
         applied = db.migrate(conn)
     if applied:
@@ -182,7 +198,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="maxicash", description="Collecteur MAXICASH")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("migrate", help="applique les migrations").set_defaults(func=cmd_migrate)
+    p = sub.add_parser("migrate", help="applique les migrations")
+    p.add_argument("--yes", action="store_true",
+                   help="ne pas demander confirmation sur une base distante")
+    p.set_defaults(func=cmd_migrate)
 
     p = sub.add_parser("discover", help="énumère les marchands d'une plateforme")
     p.add_argument("provider")

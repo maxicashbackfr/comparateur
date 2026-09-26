@@ -45,11 +45,11 @@ jobs:
 
       - name: Migrations
         working-directory: collector
-        run: python -m maxicash.cli migrate
+        run: python -m maxicash.cli migrate --yes
 
       - name: Vérifier que les migrations sont idempotentes
         working-directory: collector
-        run: python -m maxicash.cli migrate
+        run: python -m maxicash.cli migrate --yes
 
       - name: Tests
         working-directory: collector
