@@ -90,7 +90,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
-    urls_fetched = offers_found = offers_written = errors = 0
+    urls_fetched = offers_found = offers_written = errors = empty = 0
 
     with db.connect(settings) as conn, PoliteClient(settings) as client:
         adapter = get_adapter(args.provider, client.get)
@@ -133,7 +133,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                 continue
 
             if not offers:
-                db.queue_review(conn, "no_offer_found", {"url": merchant.raw_url})
+                # Zéro offre est un résultat valide (marchand sans cashback). Le
+                # mettre en file de validation la noierait à chaque passe : on
+                # le compte seulement. Une page illisible, elle, lève une erreur.
+                empty += 1
                 continue
 
             # Le nom affiché par la plateforme vaut mieux que le slug du sitemap.
@@ -153,11 +156,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             conn.commit()
 
         status = "ok" if errors == 0 else ("partial" if offers_found else "failed")
-        notes = None
+        notes = f"{empty} marchands sans offre" if empty else None
         if previous and previous > 0:
             drift = abs(offers_found - previous) / previous
             if drift > ANOMALY_THRESHOLD:
-                notes = (
+                notes = (notes + " ; " if notes else "") + (
                     f"variation anormale : {offers_found} offres contre {previous} "
                     f"à la passe précédente ({drift:.0%}). Vérifier les sélecteurs."
                 )
@@ -175,7 +178,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     console.print(
         f"[green]Terminé.[/] {urls_fetched} pages, {offers_found} offres lues, "
-        f"{offers_written} écrites (le reste inchangé), {errors} erreurs."
+        f"{offers_written} écrites (le reste inchangé), {empty} sans offre, {errors} erreurs."
     )
     return 0
 

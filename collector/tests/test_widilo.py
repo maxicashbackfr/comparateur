@@ -118,3 +118,27 @@ def test_structure_inconnue_leve_une_erreur_explicite():
     merchant = RawMerchant("x", "x", "https://www.widilo.fr/code-promo/x")
     with pytest.raises(WidiloParseError):
         _adapter().parse_offer(merchant, "<html><body>rien</body></html>")
+
+
+def _page(**shop) -> str:
+    """Page minimale : un ng-state contenant seulement l'objet marchand."""
+    import json
+    data = {"metaTitle": "t", "routeName": "x", "name": "X", "id": 1, **shop}
+    state = {"123": {"b": json.dumps(data)}}
+    return f'<script id="ng-state" type="application/json">{json.dumps(state)}</script>'
+
+
+def test_bon_d_achat_seul_sans_cashback_en_ligne():
+    """3 Suisses (26/09/2026) : pas de cashback sur achat, 5% sur bon d'achat."""
+    html = _page(isCashback=False, cashbackRate=0, cashbackType=1, isVoucher=True,
+                 voucherCashbackRate=5.0, voucherCashbackValue="5%",
+                 freeAmountMinValue=10.0, freeAmountMaxValue=150.0)
+    merchant = RawMerchant("x", "x", "https://www.widilo.fr/code-promo/x")
+    offers = _adapter().parse_offer(merchant, html)
+    assert [(o.kind, o.value) for o in offers] == [("giftcard", Decimal("5.0"))]
+
+
+def test_marchand_sans_aucun_cashback_rend_zero_offre():
+    html = _page(isCashback=False, cashbackRate=0, cashbackType=1, isVoucher=False)
+    merchant = RawMerchant("x", "x", "https://www.widilo.fr/code-promo/x")
+    assert _adapter().parse_offer(merchant, html) == []

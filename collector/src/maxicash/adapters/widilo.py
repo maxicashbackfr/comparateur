@@ -167,9 +167,16 @@ class WidiloAdapter:
     def parse_offer(self, merchant: RawMerchant, html: str) -> list[RawOffer]:
         data = find_shop_payload(extract_ng_state(html))
 
-        if not data.get("isCashback"):
-            return []  # marchand référencé sans cashback : zéro offre est valide
+        # Un marchand peut n'avoir que du cashback sur bon d'achat (3 Suisses),
+        # ou rien du tout : zéro offre est alors un résultat valide.
+        offers = self._purchase_offers(data) if data.get("isCashback") else []
+        giftcard = self._giftcard_offer(data)
+        if giftcard:
+            offers.append(giftcard)
+        return offers
 
+    @staticmethod
+    def _purchase_offers(data: dict[str, Any]) -> list[RawOffer]:
         unit = _UNITS.get(data.get("cashbackType"))
         if unit is None:
             raise WidiloParseError(f"cashbackType inconnu : {data.get('cashbackType')!r}")
@@ -222,10 +229,14 @@ class WidiloAdapter:
                     is_new_customer_only=_has(label, _NEW_CUSTOMER),
                 ))
 
-        # Bon d'achat Widilo : autre produit, conservé mais jamais trié.
+        return offers
+
+    @staticmethod
+    def _giftcard_offer(data: dict[str, Any]) -> RawOffer | None:
+        """Bon d'achat Widilo : autre produit, conservé mais jamais trié."""
         if data.get("isVoucher") and data.get("voucherCashbackRate"):
             lo, hi = data.get("freeAmountMinValue"), data.get("freeAmountMaxValue")
-            offers.append(RawOffer(
+            return RawOffer(
                 raw_text=str(data.get("voucherCashbackValue") or data["voucherCashbackRate"]),
                 value=Decimal(str(data["voucherCashbackRate"])),
                 unit="percent",
@@ -234,5 +245,5 @@ class WidiloAdapter:
                     f"Bon d'achat de {lo:g} à {hi:g} €" if lo is not None and hi is not None
                     else None
                 ),
-            ))
-        return offers
+            )
+        return None
