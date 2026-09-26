@@ -1,7 +1,7 @@
 """Types partagés entre adaptateurs, normalisation et persistance."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal, Protocol, Iterator
 

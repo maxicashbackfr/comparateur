@@ -11,75 +11,113 @@ Ce que l'inspection du site a établi (19/09/2026) :
   source d'énumération : autorisée, stable, et qui évite de crawler des pages
   de listing paginées.
 * Une page marchand vit sur /code-promo/<slug>.
-* Le taux s'affiche « 7,2% remboursés sur vos achats ». En campagne boostée,
-  le listing montre deux valeurs accolées (« 2%6% ») : un taux barré suivi du
-  taux courant. Certains marchands sont en montant fixe (« 31€62€ », Orange).
-* Une prime d'inscription (« +5€ à l'inscription ») et un taux de bon d'achat
-  (« 3,5% remboursés immédiatement ») cohabitent sur la même page. Les trois
-  doivent être distingués, sans quoi le comparateur affiche n'importe quoi.
 
-XPATHS ci-dessous est le SEUL endroit à ajuster quand le DOM change. Lancez
-`maxicash snapshot widilo fnac` pour figer une page réelle en fixture, puis
-`pytest tests/test_widilo.py` : le test reste rouge tant que les expressions
-ne sont pas justes — c'est exactement ce qu'on veut, plutôt que des données
-silencieusement fausses.
+Ce que les pages réelles ont montré (26/09/2026, 5 fixtures) :
+
+* Widilo est une application Angular rendue côté serveur. Toutes les données
+  de la page sont sérialisées dans <script id="ng-state" type="application/json">.
+  On lit ce JSON, pas le DOM : les champs y sont typés (cashbackRate: 6.0,
+  cashbackType: 1 = %, 2 = €, cashbackBeforeIncreaseValue: "3%" en boost…) et
+  ne dépendent ni des classes CSS ni de la mise en page.
+* Les clés de premier niveau de ng-state sont des hachages qui changent d'une
+  page à l'autre. L'objet marchand est repéré par son contenu (présence de
+  metaTitle, routeName et cashbackRate), jamais par sa clé.
+* La prime d'inscription (« 5€ ») et le seuil de paiement (« 20€ ») sont des
+  données de la PLATEFORME, pas du marchand : elles vivent dans une autre entrée
+  de ng-state et relèvent de la table provider, pas d'offer_snapshot.
+
+Si Widilo change de structure, `find_shop_payload` lève WidiloParseError :
+une page devient une erreur visible (review_queue), jamais un taux inventé.
 """
 from __future__ import annotations
 
+import json
 import re
-from typing import Iterator
+from decimal import Decimal
+from typing import Any, Iterator
 
-from lxml import html as lxml_html
-
-from ..normalize import parse_offer
-from ..types import RawMerchant, RawOffer
+from ..normalize import (
+    _MARKETPLACE_EXCLUDED, _NEW_CUSTOMER, _SALE_EXCLUDED, _fold,
+    compute_effective_value, extract_amounts,
+)
+from ..types import RawMerchant, RawOffer, Unit
 
 BASE_URL = "https://www.widilo.fr"
 SITEMAP_URL = f"{BASE_URL}/shop-sitemap.xml"
 MERCHANT_PATH = "/code-promo/"
 
-
-def _cls(*fragments: str) -> str:
-    """Prédicat XPath « l'attribut class contient l'un de ces fragments »."""
-    tests = " or ".join(f"contains(@class, '{f}')" for f in fragments)
-    return f"[{tests}]"
-
-
-# --- Le seul endroit à ajuster quand le DOM change ---------------------------
-XPATHS = {
-    # Bloc portant le taux d'achat courant.
-    "rate_block": (
-        "//*[@data-testid='cashback-rate']"
-        f" | //*{_cls('cashback-rate')}"
-        f" | //*{_cls('cashbackRate')}"
-    ),
-    # Taux barré (campagne boostée). La rature est la seule indication fiable
-    # de savoir lequel des deux montants est l'ancien.
-    "rate_base": (
-        ".//del | .//s"
-        f" | .//*{_cls('line-through', 'strikethrough', 'lineThrough')}"
-    ),
-    # Conditions et exclusions.
-    "conditions": f"//*{_cls('condition', 'terms', 'exclusion')}",
-    # Lignes d'un éventuel tableau de taux par catégorie.
-    "category_rows": (
-        f"//*{_cls('category-rates', 'categoryRates')}//tr"
-        " | //*[@data-testid='category-rate']"
-    ),
-    # Bloc de prime d'inscription, s'il est isolé dans le DOM.
-    "signup_block": f"//*{_cls('signup-bonus', 'signupBonus', 'welcome-bonus')}",
-    # Bloc de taux sur bons d'achat.
-    "giftcard_block": f"//*{_cls('giftcard', 'gift-card', 'bon-achat')}",
-    "merchant_name": "//h1",
-}
-
 _SITEMAP_ENTRY = re.compile(r"<url>(?:(?!</url>).)*?</url>", re.IGNORECASE | re.DOTALL)
 _SITEMAP_LOC = re.compile(r"<loc>\s*([^<]+?)\s*</loc>", re.IGNORECASE)
 _LASTMOD = re.compile(r"<lastmod>\s*([^<]+?)\s*</lastmod>", re.IGNORECASE)
+_NG_STATE = re.compile(r'<script[^>]+id="ng-state"[^>]*>(.*?)</script>', re.DOTALL)
+
+# cashbackType côté Widilo
+_UNITS: dict[int, Unit] = {1: "percent", 2: "fixed_eur"}
+# « Marketplace, Livre : 0% » dans le détail des taux vaut exclusion.
+_MARKETPLACE_TIER = re.compile(r"marketplace", re.IGNORECASE)
 
 
-def _text(node) -> str:
-    return re.sub(r"\s+", " ", node.text_content()).strip()
+class WidiloParseError(ValueError):
+    """La page ne contient pas les données attendues : structure changée."""
+
+
+# --- lecture de ng-state -----------------------------------------------------
+
+def extract_ng_state(html: str) -> dict[str, Any]:
+    match = _NG_STATE.search(html)
+    if not match:
+        raise WidiloParseError("bloc ng-state introuvable")
+    return json.loads(match.group(1))
+
+
+def find_shop_payload(state: dict[str, Any]) -> dict[str, Any]:
+    required = {"metaTitle", "routeName", "cashbackRate"}
+    for key, entry in state.items():
+        if key == "__nghData__" or not isinstance(entry, dict):
+            continue
+        body = entry.get("b")
+        if not isinstance(body, str) or '"cashbackRate"' not in body:
+            continue
+        data = json.loads(body)
+        if isinstance(data, dict) and required <= data.keys():
+            return data
+    raise WidiloParseError("objet marchand introuvable dans ng-state")
+
+
+def _amount(raw: str | None) -> tuple[Decimal, Unit] | None:
+    """« 4,5% » -> (4.5, percent). Réutilise l'extracteur commun."""
+    found = extract_amounts(raw or "")
+    return found[0] if len(found) == 1 else None
+
+
+def _has(text: str, keywords: tuple[str, ...]) -> bool:
+    folded = _fold(text)
+    return any(k in folded for k in keywords)
+
+
+def _tiers(data: dict[str, Any]) -> list[tuple[str, Decimal, Unit, str]]:
+    """Détail des taux : (libellé, valeur, unité, texte brut)."""
+    out = []
+    for item in (data.get("cashbackDescription") or {}).get("dynamic") or []:
+        parsed = _amount(item.get("value"))
+        if parsed is None:
+            continue
+        label = " — ".join(
+            s.strip() for s in item.get("descriptions") or [] if s and s.strip()
+        )
+        out.append((label, parsed[0], parsed[1], f"{item['value']} {label}".strip()))
+    return out
+
+
+def _conditions(data: dict[str, Any]) -> str | None:
+    desc = data.get("cashbackDescription") or {}
+    notes = [s["description"].strip() for s in desc.get("static") or [] if s.get("description")]
+    rules = [
+        c["value"].strip()
+        for c in (data.get("cashbackConditions") or {}).get("conditionList") or []
+        if c.get("value")
+    ]
+    return "\n".join(notes + rules) or None
 
 
 class WidiloAdapter:
@@ -118,55 +156,83 @@ class WidiloAdapter:
 
     # -- lecture d'une page ---------------------------------------------------
 
+    @staticmethod
+    def merchant_name(html: str) -> str | None:
+        """Nom affiché par Widilo (« New Balance »), plus fiable que le slug."""
+        try:
+            return find_shop_payload(extract_ng_state(html)).get("name")
+        except WidiloParseError:
+            return None
+
     def parse_offer(self, merchant: RawMerchant, html: str) -> list[RawOffer]:
-        tree = lxml_html.fromstring(html)
-        offers: list[RawOffer] = []
+        data = find_shop_payload(extract_ng_state(html))
 
-        conditions_nodes = tree.xpath(XPATHS["conditions"])
-        conditions = _text(conditions_nodes[0]) if conditions_nodes else None
+        if not data.get("isCashback"):
+            return []  # marchand référencé sans cashback : zéro offre est valide
 
-        for block in tree.xpath(XPATHS["rate_block"])[:1]:
-            full = _text(block)
-            base_nodes = block.xpath(XPATHS["rate_base"])
-            base_text = _text(base_nodes[0]) if base_nodes else None
-            current = full.replace(base_text, " ", 1) if base_text else full
-            offer = parse_offer(full, current=current, base=base_text,
-                                conditions_text=conditions)
-            if offer:
-                offers.append(offer)
+        unit = _UNITS.get(data.get("cashbackType"))
+        if unit is None:
+            raise WidiloParseError(f"cashbackType inconnu : {data.get('cashbackType')!r}")
 
-        offers.extend(self._parse_simple(tree, XPATHS["signup_block"], conditions))
-        offers.extend(self._parse_simple(tree, XPATHS["giftcard_block"], conditions))
-        offers.extend(self._parse_categories(tree, conditions))
+        value = Decimal(str(data["cashbackRate"]))
+        base = _amount(data.get("cashbackBeforeIncreaseValue")) if data.get(
+            "cashbackIsIncrease") else None
+        conditions = _conditions(data)
+        tiers = _tiers(data)
 
-        # Repli : aucune expression n'a mordu. On lit le titre, ce qui donne au
-        # moins un signal — et l'appelant met la page en file de validation.
-        if not offers:
-            names = tree.xpath(XPATHS["merchant_name"])
-            offer = parse_offer(_text(names[0]) if names else "", conditions_text=conditions)
-            if offer:
-                offers.append(offer)
+        # Le taux affiché correspond à l'une des lignes de détail ; c'est elle
+        # qui dit s'il est réservé aux nouveaux clients (Audible, Recyclivre).
+        main_label = next((t[0] for t in tiers if t[1] == value and t[2] == unit), "")
+        distinct = {(t[1], t[2]) for t in tiers}
+        marketplace_tier = any(t[1] == 0 and _MARKETPLACE_TIER.search(t[0]) for t in tiers)
 
+        purchase = RawOffer(
+            raw_text=json.dumps({
+                "cashbackValue": data.get("cashbackValue"),
+                "cashbackBeforeIncreaseValue": data.get("cashbackBeforeIncreaseValue"),
+                "label": main_label or None,
+            }, ensure_ascii=False),
+            value=value,
+            value_base=base[0] if base and base[1] == unit else None,
+            unit=unit,
+            kind="purchase",
+            conditions_text=conditions,
+            # Plusieurs taux : celui affiché est un maximum.
+            is_upto=len(distinct) > 1,
+            is_new_customer_only=_has(main_label, _NEW_CUSTOMER),
+            is_sale_excluded=True if _has(conditions or "", _SALE_EXCLUDED) else None,
+            is_marketplace_excluded=(
+                True if marketplace_tier or _has(conditions or "", _MARKETPLACE_EXCLUDED)
+                else None
+            ),
+        )
+        purchase.effective_value = compute_effective_value(purchase)
+        offers = [purchase]
+
+        # Détail par catégorie, seulement s'il apporte quelque chose : une ligne
+        # unique répète le taux principal.
+        if len(distinct) > 1:
+            for label, tier_value, tier_unit, raw in tiers:
+                offers.append(RawOffer(
+                    raw_text=raw,
+                    value=tier_value,
+                    unit=tier_unit,
+                    kind="category",
+                    category_label=label or None,
+                    is_new_customer_only=_has(label, _NEW_CUSTOMER),
+                ))
+
+        # Bon d'achat Widilo : autre produit, conservé mais jamais trié.
+        if data.get("isVoucher") and data.get("voucherCashbackRate"):
+            lo, hi = data.get("freeAmountMinValue"), data.get("freeAmountMaxValue")
+            offers.append(RawOffer(
+                raw_text=str(data.get("voucherCashbackValue") or data["voucherCashbackRate"]),
+                value=Decimal(str(data["voucherCashbackRate"])),
+                unit="percent",
+                kind="giftcard",
+                conditions_text=(
+                    f"Bon d'achat de {lo:g} à {hi:g} €" if lo is not None and hi is not None
+                    else None
+                ),
+            ))
         return offers
-
-    @staticmethod
-    def _parse_simple(tree, xpath: str, conditions: str | None) -> list[RawOffer]:
-        out: list[RawOffer] = []
-        for node in tree.xpath(xpath):
-            offer = parse_offer(_text(node), conditions_text=conditions)
-            if offer:
-                out.append(offer)
-        return out
-
-    @staticmethod
-    def _parse_categories(tree, conditions: str | None) -> list[RawOffer]:
-        out: list[RawOffer] = []
-        for node in tree.xpath(XPATHS["category_rows"]):
-            text = _text(node)
-            if not text or ("%" not in text and "€" not in text):
-                continue
-            label = re.split(r"\d", text, maxsplit=1)[0].strip(" :-") or None
-            offer = parse_offer(text, category_label=label, conditions_text=conditions)
-            if offer:
-                out.append(offer)
-        return out

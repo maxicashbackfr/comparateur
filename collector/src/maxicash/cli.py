@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from rich.console import Console
@@ -84,7 +84,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     path = target / f"{args.slug}.html"
     path.write_text(html, encoding="utf-8")
     console.print(f"[green]Fixture écrite :[/] {path} ({len(html):,} octets)")
-    console.print("[dim]Ajustez SELECTORS dans l'adaptateur, puis : pytest -q[/]")
+    console.print("[dim]Ajoutez un test dans tests/test_<plateforme>.py, puis : pytest -q[/]")
     return 0
 
 
@@ -124,15 +124,23 @@ def cmd_run(args: argparse.Namespace) -> int:
                 continue
             except Exception as exc:
                 errors += 1
+                kind = "parse_error" if isinstance(exc, ValueError) else "fetch_error"
                 db.queue_review(
-                    conn, "fetch_error",
-                    {"url": merchant.raw_url, "error": str(exc)},
+                    conn, kind,
+                    {"url": merchant.raw_url, "error": f"{type(exc).__name__}: {exc}"},
                 )
+                conn.commit()
                 continue
 
             if not offers:
                 db.queue_review(conn, "no_offer_found", {"url": merchant.raw_url})
                 continue
+
+            # Le nom affiché par la plateforme vaut mieux que le slug du sitemap.
+            name_of = getattr(adapter, "merchant_name", None)
+            name = name_of(html) if name_of else None
+            if name:
+                merchant = replace(merchant, raw_name=name)
 
             alias_id = db.upsert_alias(conn, provider_id, merchant)
             for offer in offers:

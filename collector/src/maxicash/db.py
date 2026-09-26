@@ -6,7 +6,6 @@ couche à entretenir pour un gain nul à cette échelle.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from decimal import Decimal
 from typing import Iterator
 
 import psycopg

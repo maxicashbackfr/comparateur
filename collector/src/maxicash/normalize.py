@@ -69,7 +69,7 @@ def extract_amounts(text: str) -> list[tuple[Decimal, Unit]]:
 
     « 2%6% » rend [(2, percent), (6, percent)] — la page affiche un taux barré
     suivi du taux courant. Lequel est lequel ne se devine pas depuis le texte :
-    c'est le DOM qui le dit (voir `widilo.SELECTORS`).
+    c'est la source structurée qui le dit (chez Widilo, cashbackBeforeIncreaseValue).
     """
     out: list[tuple[Decimal, Unit]] = []
     for raw, unit_token in _AMOUNT_RE.findall(text):

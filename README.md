@@ -61,21 +61,27 @@ trafic, jamais toute l'autorité acquise.
 | `maxicash run widilo --limit 20` | collecte et écrit en base |
 | `maxicash status` | dernières passes, fraîcheur, erreurs |
 
-## La première chose à faire
+## Comment l'adaptateur Widilo lit une page
 
-Les expressions XPath de `adapters/widilo.py` ont été écrites d'après la
-structure observée du site, pas d'après son balisage réel — je n'ai pas eu
-accès au HTML brut. Elles sont regroupées dans un seul dictionnaire `XPATHS`.
+Widilo est une application Angular rendue côté serveur : toutes les données de
+la page sont sérialisées dans `<script id="ng-state" type="application/json">`.
+L'adaptateur lit ce JSON (taux, unité, taux d'avant boost, détail par
+catégorie, bon d'achat, conditions) plutôt que le DOM — pas de sélecteur CSS
+ou XPath à entretenir, et pas besoin de Playwright.
+
+Cinq pages réelles, figées le 26/09/2026, servent de fixtures
+(`collector/tests/fixtures/widilo/`) et couvrent les cas piégeux : montant
+fixe, boost, nouveaux clients, taux par catégorie, bon d'achat.
+
+Si Widilo change de structure, la page part en `review_queue` (`parse_error`)
+et les tests passent au rouge. Pour rafraîchir une fixture :
 
 ```bash
-maxicash snapshot widilo fnac      # fige la vraie page
-make test                     # le test sur fixture réelle échoue
-# ajustez XPATHS, relancez jusqu'au vert
+maxicash snapshot widilo fnac
+make test
 ```
 
-Ce test est volontairement le garde-fou du projet : tant qu'il est rouge,
-aucune collecte ne doit tourner. Une casse de DOM devient un test rouge
-plutôt que des données silencieusement fausses.
+Tant que les tests sont rouges, aucune collecte ne doit tourner.
 
 ## Ce que la collecte respecte
 
