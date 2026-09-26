@@ -154,3 +154,44 @@ def compute_effective_value(offer: RawOffer) -> Decimal | None:
     if offer.is_new_customer_only:
         return None
     return offer.value
+
+
+# Champs qui définissent l'identité d'une offre. Deux relevés qui coïncident
+# sur tous ces champs décrivent le même taux : le second n'apporte rien à
+# l'historique et n'est pas écrit (voir migration 003).
+#
+# `conditions_text` en fait partie volontairement : un changement d'exclusion
+# — « hors soldes » qui apparaît — modifie la valeur réelle de l'offre sans
+# toucher au pourcentage affiché.
+COMPARED_FIELDS = (
+    "value", "value_base", "unit", "kind", "category_label",
+    "conditions_text", "is_upto", "is_new_customer_only",
+    "is_sale_excluded", "is_marketplace_excluded", "effective_value",
+)
+
+
+def same_offer(previous: dict | None, offer: RawOffer) -> bool:
+    """L'offre est-elle identique au dernier relevé conservé ?
+
+    `previous` est une ligne d'offer_snapshot telle que la base la rend, ou
+    None quand aucun relevé n'existe encore — auquel cas il faut écrire.
+    """
+    if previous is None:
+        return False
+    for field in COMPARED_FIELDS:
+        if _normalize_compared(previous.get(field)) != _normalize_compared(
+            getattr(offer, field)
+        ):
+            return False
+    return True
+
+
+def _normalize_compared(value):
+    """Aligne les représentations avant comparaison : Decimal('7.20') et
+    Decimal('7.2') sont le même taux, et une chaîne vide vaut une absence."""
+    if isinstance(value, Decimal):
+        return value.normalize()
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return value

@@ -5,7 +5,8 @@ from decimal import Decimal
 import pytest
 
 from maxicash.normalize import (
-    classify, compute_effective_value, extract_amounts, parse_offer, to_decimal,
+    classify, compute_effective_value, extract_amounts, parse_offer,
+    same_offer, to_decimal,
 )
 
 
@@ -107,3 +108,55 @@ def test_effective_value_ignore_l_unite_mais_pas_le_type():
 
     fixed = RawOffer(raw_text="20€", value=Decimal("20"), unit="fixed_eur")
     assert compute_effective_value(fixed) == Decimal("20")
+
+
+# --- Écriture au changement (migration 003) ----------------------------------
+
+def _row(**kwargs):
+    """Une ligne d'offer_snapshot telle que psycopg la rend."""
+    base = {
+        "value": Decimal("7.2"), "value_base": None, "unit": "percent",
+        "kind": "purchase", "category_label": None, "conditions_text": None,
+        "is_upto": False, "is_new_customer_only": False,
+        "is_sale_excluded": None, "is_marketplace_excluded": None,
+        "effective_value": Decimal("7.2"),
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_premier_releve_est_toujours_ecrit():
+    assert same_offer(None, parse_offer("7,2% remboursés")) is False
+
+
+def test_taux_identique_n_est_pas_reecrit():
+    assert same_offer(_row(), parse_offer("7,2% remboursés")) is True
+
+
+def test_decimales_equivalentes_comptent_pour_identiques():
+    # 7.20 et 7.2 sont le même taux : une différence de représentation ne doit
+    # pas provoquer une écriture.
+    assert same_offer(_row(value=Decimal("7.20")), parse_offer("7,2% remboursés")) is True
+
+
+def test_changement_de_taux_declenche_une_ecriture():
+    assert same_offer(_row(value=Decimal("5")), parse_offer("7,2% remboursés")) is False
+
+
+def test_apparition_d_un_taux_barre_declenche_une_ecriture():
+    # Passage en campagne boostée : la valeur courante ne bouge pas, mais
+    # l'offre a bel et bien changé.
+    offer = parse_offer("2% 7,2%", current="7,2%", base="2%")
+    assert same_offer(_row(value_base=None), offer) is False
+
+
+def test_changement_d_exclusion_declenche_une_ecriture():
+    # Le pourcentage est identique, mais « hors soldes » vient d'apparaître :
+    # la valeur réelle de l'offre a changé. C'est le cas que l'on raterait en
+    # ne comparant que le nombre.
+    offer = parse_offer("7,2% remboursés, hors soldes")
+    assert same_offer(_row(), offer) is False
+
+
+def test_conditions_vides_et_absentes_sont_equivalentes():
+    assert same_offer(_row(conditions_text=""), parse_offer("7,2% remboursés")) is True

@@ -74,7 +74,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
-    urls_fetched = offers_found = errors = 0
+    urls_fetched = offers_found = offers_written = errors = 0
 
     with db.connect(settings) as conn, PoliteClient(settings) as client:
         adapter = get_adapter(args.provider, client.get)
@@ -89,7 +89,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         except Exception as exc:  # énumération cassée = passe inutilisable
             db.finish_run(
                 conn, run_id, status="failed", urls_fetched=0, offers_found=0,
-                errors_count=1, notes=f"énumération : {exc}",
+                offers_written=0, errors_count=1, notes=f"énumération : {exc}",
             )
             console.print(f"[red]Énumération impossible :[/] {exc}")
             return 1
@@ -120,11 +120,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 
             alias_id = db.upsert_alias(conn, provider_id, merchant)
             for offer in offers:
-                db.insert_snapshot(
+                offers_found += 1
+                if db.record_offer(
                     conn, alias_id=alias_id, provider_id=provider_id,
                     run_id=run_id, offer=offer,
-                )
-                offers_found += 1
+                ):
+                    offers_written += 1
             conn.commit()
 
         status = "ok" if errors == 0 else ("partial" if offers_found else "failed")
@@ -140,7 +141,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         db.finish_run(
             conn, run_id, status=status, urls_fetched=urls_fetched,
-            offers_found=offers_found, errors_count=errors, notes=notes,
+            offers_found=offers_found, offers_written=offers_written,
+            errors_count=errors, notes=notes,
         )
         try:
             db.refresh_current(conn)
@@ -148,7 +150,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             pass  # la vue n'existe pas encore au tout premier run
 
     console.print(
-        f"[green]Terminé.[/] {urls_fetched} pages, {offers_found} offres, {errors} erreurs."
+        f"[green]Terminé.[/] {urls_fetched} pages, {offers_found} offres lues, "
+        f"{offers_written} écrites (le reste inchangé), {errors} erreurs."
     )
     return 0
 
@@ -156,19 +159,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
     table = Table(title="Dernières passes")
-    for column in ("Plateforme", "Statut", "Pages", "Offres", "Erreurs", "Fin"):
+    for column in ("Plateforme", "Statut", "Pages", "Lues", "Écrites", "Erreurs", "Fin"):
         table.add_column(column)
     with db.connect(settings) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT p.slug, r.status, r.urls_fetched, r.offers_found, r.errors_count,"
-            " r.finished_at FROM scrape_run r JOIN provider p ON p.id = r.provider_id"
+            "SELECT p.slug, r.status, r.urls_fetched, r.offers_found,"
+            " r.offers_written, r.errors_count, r.finished_at FROM scrape_run r"
+            " JOIN provider p ON p.id = r.provider_id"
             " ORDER BY r.started_at DESC LIMIT 15"
         )
         for row in cur.fetchall():
             table.add_row(
                 row["slug"], row["status"], str(row["urls_fetched"]),
-                str(row["offers_found"]), str(row["errors_count"]),
-                str(row["finished_at"] or "—"),
+                str(row["offers_found"]), str(row["offers_written"]),
+                str(row["errors_count"]), str(row["finished_at"] or "—"),
             )
     console.print(table)
     return 0

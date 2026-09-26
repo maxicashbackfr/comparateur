@@ -13,6 +13,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .config import MIGRATIONS_DIR, Settings
+from .normalize import COMPARED_FIELDS, same_offer
 from .types import RawMerchant, RawOffer
 
 
@@ -71,14 +72,17 @@ def finish_run(
     status: str,
     urls_fetched: int,
     offers_found: int,
+    offers_written: int,
     errors_count: int,
     notes: str | None = None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE scrape_run SET finished_at = now(), status = %s, urls_fetched = %s,"
-            " offers_found = %s, errors_count = %s, notes = %s WHERE id = %s",
-            (status, urls_fetched, offers_found, errors_count, notes, run_id),
+            " offers_found = %s, offers_written = %s, errors_count = %s, notes = %s"
+            " WHERE id = %s",
+            (status, urls_fetched, offers_found, offers_written, errors_count,
+             notes, run_id),
         )
     conn.commit()
 
@@ -93,6 +97,63 @@ def upsert_alias(conn: psycopg.Connection, provider_id: int, merchant: RawMercha
             (provider_id, merchant.raw_slug, merchant.raw_name, merchant.raw_url),
         )
         return cur.fetchone()["id"]
+
+
+def latest_snapshot(
+    conn: psycopg.Connection, alias_id: int, offer: RawOffer
+) -> dict | None:
+    """Dernier relevé conservé pour cette offre, ou None.
+
+    La clé n'est pas l'alias seul : une page porte plusieurs offres de natures
+    différentes (achat, prime, bon d'achat, catégories). On compare chacune à
+    celle qui lui correspond, sans quoi un taux catégoriel écraserait le taux
+    d'achat à chaque passe.
+    """
+    fields = ", ".join(COMPARED_FIELDS)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {fields} FROM offer_snapshot"
+            " WHERE merchant_alias_id = %s AND kind = %s"
+            "   AND category_label IS NOT DISTINCT FROM %s"
+            " ORDER BY collected_at DESC LIMIT 1",
+            (alias_id, offer.kind, offer.category_label),
+        )
+        return cur.fetchone()
+
+
+def touch_alias(conn: psycopg.Connection, alias_id: int) -> None:
+    """Enregistre le fait d'avoir vérifié. C'est ce qui rend la fraîcheur
+    affichable même quand aucun taux n'a bougé depuis des semaines."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE merchant_alias SET last_checked_at = now() WHERE id = %s",
+            (alias_id,),
+        )
+
+
+def record_offer(
+    conn: psycopg.Connection,
+    *,
+    alias_id: int,
+    provider_id: int,
+    run_id: int,
+    offer: RawOffer,
+) -> bool:
+    """Écrit le relevé s'il diffère du précédent. Rend True si une ligne a été
+    insérée.
+
+    Un taux bouge rarement : réécrire l'identique quatre fois par jour remplit
+    la base sans rien ajouter à l'historique (voir migration 003). Le principe
+    reste tenu — aucun UPDATE sur un taux, offer_snapshot est en ajout seul.
+    """
+    previous = latest_snapshot(conn, alias_id, offer)
+    touch_alias(conn, alias_id)
+    if same_offer(previous, offer):
+        return False
+    insert_snapshot(
+        conn, alias_id=alias_id, provider_id=provider_id, run_id=run_id, offer=offer
+    )
+    return True
 
 
 def insert_snapshot(

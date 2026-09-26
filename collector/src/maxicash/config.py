@@ -24,7 +24,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         ua = os.getenv("MAXICASH_USER_AGENT", "").strip()
-        if not ua or "VOTRE-DOMAINE" in ua:
+        if not ua or "VOTRE-DOMAINE" in ua or "example" in ua.lower():
             raise RuntimeError(
                 "MAXICASH_USER_AGENT doit être renseigné avec une URL de contact joignable. "
                 "Un crawler anonyme est ce qui déclenche un blocage — et c'est mérité."

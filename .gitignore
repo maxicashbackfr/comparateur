@@ -10,3 +10,6 @@ dist/
 build/
 .cache/
 collector/.httpcache/
+
+# État local du CLI Neon (à ajuster si le CLI utilise un autre chemin)
+.neon/

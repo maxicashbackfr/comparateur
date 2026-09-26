@@ -4,6 +4,23 @@ Socle minimal du MVP (lot L0 réduit) et premier adaptateur de plateforme
 (lot L1, Widilo). Le périmètre, les arbitrages et le découpage en lots sont
 dans **Spécification MVP — Comparateur de cashback + extension**.
 
+## Base de données : Neon
+
+Le projet tourne sur **Neon** (Postgres managé, mise en veille automatique).
+Deux endpoints pour le même projet, et la distinction compte :
+
+| Endpoint | Hostname | Usage |
+|---|---|---|
+| Direct | `ep-XXXX.<region>.aws.neon.tech` | collecteur et migrations |
+| Poolé | `ep-XXXX-pooler.<region>.aws.neon.tech` | le site Next.js (lot L4) |
+
+Le collecteur utilise l'endpoint **direct** : il ouvre une connexion, la garde
+le temps de la passe, et `REFRESH MATERIALIZED VIEW` a besoin d'une session
+complète. Le pooling par transaction est fait pour l'inverse — beaucoup de
+connexions courtes, comme celles d'un rendu serverless.
+
+`sslmode=require` et `channel_binding=require` sont exigés par Neon.
+
 ## Démarrer
 
 ```bash
@@ -17,6 +34,22 @@ make test                     # suite de tests, sans réseau
 `MAXICASH_USER_AGENT` doit contenir une URL de contact joignable. Le collecteur
 refuse de démarrer sans, et c'est voulu : un crawler anonyme est ce qui
 déclenche un blocage.
+
+Le domaine est **maxicash.fr**. Publiez-y une page `/bot` avant la première
+passe en production : elle explique qui nous sommes, ce que nous collectons et
+comment nous joindre pour demander un retrait. C'est ce qui transforme un
+blocage automatique en courriel, et c'est l'adresse que porte le User-Agent.
+
+Arborescence SEO arrêtée (§12 de la spéc) :
+
+```
+maxicash.fr/cashback/{marchand}      page marchand — 90 % du trafic visé
+maxicash.fr/plateformes/{plateforme} fiche plateforme
+maxicash.fr/meilleurs-taux           classements hebdomadaires
+```
+
+Ces chemins ne changent plus une fois indexés : une redirection conserve le
+trafic, jamais toute l'autorité acquise.
 
 ## Commandes
 
@@ -70,6 +103,43 @@ collector/
     adapters/      une plateforme = un fichier
   tests/           fixtures + tests, aucun accès réseau
 ```
+
+## Deux décisions coûteuses à défaire
+
+Le reste du code est remplaçable. Ces deux règles ne le sont pas — les enfreindre
+ne casse rien tout de suite, et coûte cher plus tard.
+
+**1. `DATABASE_URL` est le seul point de couplage à l'hébergeur.**
+
+Pas d'ORM, pas d'extension exotique, pas de SDK propriétaire, des migrations en
+SQL brut appliquées par notre propre exécuteur. Changer d'hébergeur doit rester
+un changement de variable d'environnement.
+
+Ce qui romprait la règle, par ordre de tentation : le driver serverless de Neon
+(HTTP au lieu de TCP) — si adopté côté site, à isoler derrière une seule
+fonction d'accès ; les branches Neon dans la CI — confort de développement,
+jamais une dépendance du produit ; de la logique métier en PL/pgSQL — elle
+appartient à Python, où elle se teste et se déplace.
+
+Conséquence : partir de Neon laisse les deux portes ouvertes. S'appuyer un jour
+sur l'authentification d'une plateforme en ferme une, parce que les identités
+et les politiques de sécurité, elles, ne se transfèrent pas.
+
+**2. `offer_snapshot` est en ajout seul.**
+
+Aucun `UPDATE` sur un taux, jamais. L'état courant est une vue dérivée. C'est
+l'historique qui fait la valeur du produit, et il ne se reconstitue pas après
+coup.
+
+Depuis la migration 003, un relevé identique au précédent n'est pas réécrit —
+ce n'est pas une entorse : ce qui est mis à jour est `last_checked_at`, la
+preuve d'avoir vérifié, qui n'est pas une donnée d'historique. Sans cela la
+base grossit d'environ 360 Mo par mois sans rien apprendre ; avec, de l'ordre
+de 20 Mo.
+
+Le site doit afficher **les deux dates** : « ce taux est en vigueur depuis le X »
+(`collected_at`) et « vérifié le Y » (`last_checked_at`). Les confondre ferait
+passer un taux stable et frais pour un taux périmé.
 
 ## Ce qui reste du lot L0
 
