@@ -16,6 +16,9 @@ class RawMerchant:
     raw_name: str
     raw_url: str
     lastmod: str | None = None
+    # Site du marchand selon la plateforme (« https://www.fnac.com/ »), lu sur
+    # la page et jamais obtenu en suivant un lien de tracking.
+    raw_domain: str | None = None
 
 
 @dataclass

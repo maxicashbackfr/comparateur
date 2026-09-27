@@ -157,12 +157,14 @@ class WidiloAdapter:
     # -- lecture d'une page ---------------------------------------------------
 
     @staticmethod
-    def merchant_name(html: str) -> str | None:
-        """Nom affiché par Widilo (« New Balance »), plus fiable que le slug."""
+    def merchant_details(html: str) -> dict[str, str | None]:
+        """Nom affiché (« New Balance », plus fiable que le slug) et site du
+        marchand (« http://www.newbalance.fr/fr/home »), clé d'appariement."""
         try:
-            return find_shop_payload(extract_ng_state(html)).get("name")
+            data = find_shop_payload(extract_ng_state(html))
         except WidiloParseError:
-            return None
+            return {}
+        return {"raw_name": data.get("name"), "raw_domain": data.get("url")}
 
     def parse_offer(self, merchant: RawMerchant, html: str) -> list[RawOffer]:
         data = find_shop_payload(extract_ng_state(html))

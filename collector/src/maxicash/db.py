@@ -12,6 +12,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .config import MIGRATIONS_DIR, Settings
+from .matching import KnownMerchant
 from .normalize import COMPARED_FIELDS, same_offer
 from .types import RawMerchant, RawOffer
 
@@ -89,11 +90,14 @@ def finish_run(
 def upsert_alias(conn: psycopg.Connection, provider_id: int, merchant: RawMerchant) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO merchant_alias (provider_id, raw_slug, raw_name, raw_url)"
-            " VALUES (%s, %s, %s, %s)"
+            "INSERT INTO merchant_alias (provider_id, raw_slug, raw_name, raw_url, raw_domain)"
+            " VALUES (%s, %s, %s, %s, %s)"
             " ON CONFLICT (provider_id, raw_slug) DO UPDATE SET raw_name = EXCLUDED.raw_name,"
-            " raw_url = EXCLUDED.raw_url RETURNING id",
-            (provider_id, merchant.raw_slug, merchant.raw_name, merchant.raw_url),
+            " raw_url = EXCLUDED.raw_url,"
+            " raw_domain = COALESCE(EXCLUDED.raw_domain, merchant_alias.raw_domain)"
+            " RETURNING id",
+            (provider_id, merchant.raw_slug, merchant.raw_name, merchant.raw_url,
+             merchant.raw_domain),
         )
         return cur.fetchone()["id"]
 
@@ -210,3 +214,72 @@ def previous_offer_count(conn: psycopg.Connection, provider_id: int) -> int | No
         )
         row = cur.fetchone()
     return row["offers_found"] if row else None
+
+
+# --- appariement -------------------------------------------------------------
+
+def load_merchants(conn: psycopg.Connection) -> list[KnownMerchant]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT m.id, m.slug, m.name, m.canonical_domain,"
+            " COALESCE(array_agg(DISTINCT a.provider_id)"
+            "          FILTER (WHERE a.provider_id IS NOT NULL), '{}') AS provider_ids"
+            " FROM merchant m LEFT JOIN merchant_alias a ON a.merchant_id = m.id"
+            " GROUP BY m.id ORDER BY m.id"
+        )
+        return [
+            KnownMerchant(r["id"], r["slug"], r["name"], r["canonical_domain"],
+                          frozenset(r["provider_ids"]))
+            for r in cur.fetchall()
+        ]
+
+
+def unmatched_aliases(conn: psycopg.Connection) -> list[dict]:
+    """Alias non rattachés qui ont au moins un relevé : un marchand sans aucune
+    offre n'a pas de page à publier, inutile de lui créer une fiche."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT a.id, a.provider_id, a.raw_slug, a.raw_name, a.raw_domain"
+            " FROM merchant_alias a"
+            " WHERE a.merchant_id IS NULL"
+            "   AND EXISTS (SELECT 1 FROM offer_snapshot s WHERE s.merchant_alias_id = a.id)"
+            " ORDER BY a.id"
+        )
+        return cur.fetchall()
+
+
+def create_merchant(
+    conn: psycopg.Connection, slug: str, name: str, domain: str | None
+) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO merchant (slug, name, canonical_domain) VALUES (%s, %s, %s)"
+            " RETURNING id",
+            (slug, name, domain),
+        )
+        return cur.fetchone()["id"]
+
+
+def link_alias(
+    conn: psycopg.Connection, alias_id: int, merchant_id: int, confidence: float
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE merchant_alias SET merchant_id = %s, confidence = %s WHERE id = %s",
+            (merchant_id, confidence, alias_id),
+        )
+
+
+def queue_review_once(conn: psycopg.Connection, kind: str, payload: dict) -> bool:
+    """Comme queue_review, mais n'ajoute rien si une demande ouverte existe déjà
+    pour le même alias : relancer `match` ne doit pas empiler les doublons."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM review_queue WHERE kind = %s AND status = 'open'"
+            " AND payload->>'alias_id' = %s",
+            (kind, str(payload["alias_id"])),
+        )
+        if cur.fetchone():
+            return False
+    queue_review(conn, kind, payload)
+    return True

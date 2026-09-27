@@ -28,3 +28,64 @@ def test_best_match_refuse_plutot_que_de_se_tromper():
     candidates = {"decathlon": "Decathlon", "intersport": "Intersport"}
     slug, _ = best_match("Sport 2000", candidates)
     assert slug is None
+
+
+# --- décision d'appariement ---------------------------------------------------
+
+from maxicash.matching import KnownMerchant, decide, domain_key, unique_slug  # noqa: E402
+
+WIDILO, IGRAAL = 1, 2
+
+
+def _m(id, name, domain, *providers):
+    return KnownMerchant(id, slugify(name), name, domain, frozenset(providers))
+
+
+def test_domain_key_garde_le_domaine_enregistrable():
+    assert domain_key("https://boutique.orange.fr/") == "orange.fr"
+    assert domain_key("http://www.newbalance.fr/fr/home") == "newbalance.fr"
+    assert domain_key("https://www.amazon.co.uk/") == "amazon.co.uk"
+    assert domain_key(None) is None and domain_key("") is None
+
+
+def test_meme_domaine_rattache_avec_certitude():
+    known = [_m(1, "Orange", "orange.fr", WIDILO)]
+    d = decide(IGRAAL, "Orange Boutique", "https://www.orange.fr", known)
+    assert (d.action, d.merchant_id, d.confidence) == ("link", 1, 1.0)
+
+
+def test_meme_domaine_meme_plateforme_part_en_validation():
+    known = [_m(1, "Fnac", "fnac.com", WIDILO)]
+    assert decide(WIDILO, "Fnac Occasion", "https://www.fnac.com/occasion", known).action == "review"
+
+
+def test_nom_identique_sans_domaine_rattache():
+    known = [_m(1, "New Balance", None, WIDILO)]
+    d = decide(IGRAAL, "New Balance FR", None, known)
+    assert (d.action, d.merchant_id) == ("link", 1)
+
+
+def test_nom_identique_mais_domaines_differents_part_en_validation():
+    known = [_m(1, "Orange", "orange.fr", WIDILO)]
+    assert decide(IGRAAL, "Orange", "https://www.orange-bank.fr", known).action == "review"
+
+
+def test_nom_ressemblant_part_en_validation():
+    # 0,90 : trop proche pour créer à l'aveugle, trop loin pour rattacher.
+    known = [_m(1, "Sport 3000", None, WIDILO)]
+    assert decide(IGRAAL, "Sport 2000", None, known).action == "review"
+
+
+def test_rien_de_proche_cree_un_marchand():
+    known = [_m(1, "Fnac", "fnac.com", WIDILO)]
+    assert decide(IGRAAL, "Decathlon", "https://www.decathlon.fr", known).action == "create"
+
+
+def test_une_plateforme_ne_se_rattache_pas_deux_fois_par_le_nom():
+    known = [_m(1, "Fnac", None, WIDILO)]
+    assert decide(WIDILO, "Fnac", None, known).action == "create"
+
+
+def test_unique_slug_evite_les_collisions():
+    assert unique_slug("New Balance FR", set()) == "new-balance"
+    assert unique_slug("Fnac", {"fnac", "fnac-2"}) == "fnac-3"

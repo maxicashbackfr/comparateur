@@ -3,7 +3,8 @@
     maxicash migrate                     applique les migrations
     maxicash discover widilo             énumère les marchands via le sitemap
     maxicash snapshot widilo fnac        fige une page réelle en fixture de test
-    maxicash run widilo --limit 20       collecte et écrit en base
+    maxicash run widilo --limit 20       collecte et écrit en base (puis apparie)
+    maxicash match                       rattache les alias à un marchand unique
     maxicash status                      dernières passes et fraîcheur
 """
 from __future__ import annotations
@@ -16,7 +17,7 @@ from urllib.parse import urlsplit
 from rich.console import Console
 from rich.table import Table
 
-from . import db
+from . import db, matching
 from .adapters import get_adapter
 from .config import FIXTURES_DIR, Settings
 from .http import PoliteClient, RobotsDisallowed
@@ -139,11 +140,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                 empty += 1
                 continue
 
-            # Le nom affiché par la plateforme vaut mieux que le slug du sitemap.
-            name_of = getattr(adapter, "merchant_name", None)
-            name = name_of(html) if name_of else None
-            if name:
-                merchant = replace(merchant, raw_name=name)
+            # Nom affiché et site du marchand, lus sur la page : meilleurs que
+            # le slug du sitemap, et le domaine sert à l'appariement.
+            details_of = getattr(adapter, "merchant_details", None)
+            details = {k: v for k, v in (details_of(html) if details_of else {}).items() if v}
+            if details:
+                merchant = replace(merchant, **details)
 
             alias_id = db.upsert_alias(conn, provider_id, merchant)
             for offer in offers:
@@ -171,6 +173,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             offers_found=offers_found, offers_written=offers_written,
             errors_count=errors, notes=notes,
         )
+        # Rattache les nouveaux alias à un marchand unique : sans cela, la
+        # comparaison entre plateformes reste vide.
+        match_aliases(conn)
+
         try:
             db.refresh_current(conn)
         except Exception:
@@ -180,6 +186,68 @@ def cmd_run(args: argparse.Namespace) -> int:
         f"[green]Terminé.[/] {urls_fetched} pages, {offers_found} offres lues, "
         f"{offers_written} écrites (le reste inchangé), {empty} sans offre, {errors} erreurs."
     )
+    return 0
+
+
+def match_aliases(conn) -> dict[str, int]:
+    """Rattache chaque alias non apparié à un marchand : par domaine, puis par
+    nom ; crée le marchand s'il n'existe pas ; met le doute en validation."""
+    merchants = db.load_merchants(conn)
+    taken = {m.slug for m in merchants}
+    counts = {"link": 0, "create": 0, "review": 0}
+
+    for alias in db.unmatched_aliases(conn):
+        decision = matching.decide(
+            alias["provider_id"], alias["raw_name"], alias["raw_domain"], merchants
+        )
+        if decision.action == "review":
+            if db.queue_review_once(conn, "merchant_match", {
+                "alias_id": alias["id"], "raw_slug": alias["raw_slug"],
+                "raw_name": alias["raw_name"], "raw_domain": alias["raw_domain"],
+                "candidate_merchant_id": decision.merchant_id,
+                "score": decision.confidence, "reason": decision.reason,
+            }):
+                counts["review"] += 1
+            continue
+
+        if decision.action == "create":
+            slug = matching.unique_slug(alias["raw_name"], taken)
+            domain = matching.domain_key(alias["raw_domain"])
+            if domain and any(m.domain == domain for m in merchants):
+                domain = None  # ne peut pas arriver après decide ; garde-fou UNIQUE
+            merchant_id = db.create_merchant(conn, slug, alias["raw_name"], domain)
+            taken.add(slug)
+            merchants.append(matching.KnownMerchant(
+                merchant_id, slug, alias["raw_name"], domain, frozenset({alias["provider_id"]})
+            ))
+            db.link_alias(conn, alias["id"], merchant_id, 1.0)
+        else:
+            merchant_id = decision.merchant_id
+            db.link_alias(conn, alias["id"], merchant_id, decision.confidence or 0)
+            merchants = [
+                matching.KnownMerchant(m.id, m.slug, m.name, m.domain,
+                                       m.provider_ids | {alias["provider_id"]})
+                if m.id == merchant_id else m
+                for m in merchants
+            ]
+        counts[decision.action] += 1
+
+    conn.commit()
+    console.print(
+        f"Appariement : {counts['link']} rattachés, {counts['create']} marchands créés, "
+        f"{counts['review']} en validation."
+    )
+    return counts
+
+
+def cmd_match(args: argparse.Namespace) -> int:
+    settings = Settings.from_env()
+    with db.connect(settings) as conn:
+        match_aliases(conn)
+        try:
+            db.refresh_current(conn)
+        except Exception:
+            pass
     return 0
 
 
@@ -228,6 +296,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("provider")
     p.add_argument("--limit", type=int, default=0)
     p.set_defaults(func=cmd_run)
+
+    sub.add_parser("match", help="rattache les alias à un marchand unique").set_defaults(
+        func=cmd_match)
 
     sub.add_parser("status", help="dernières passes").set_defaults(func=cmd_status)
 

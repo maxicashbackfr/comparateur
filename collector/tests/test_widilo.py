@@ -109,9 +109,11 @@ def test_audible_nouveaux_clients():
     assert p.is_upto is False
 
 
-def test_nom_du_marchand_lu_sur_la_page():
+def test_nom_et_site_du_marchand_lus_sur_la_page():
     html = (FIXTURES / "new-balance.html").read_text(encoding="utf-8")
-    assert WidiloAdapter.merchant_name(html) == "New Balance"
+    assert WidiloAdapter.merchant_details(html) == {
+        "raw_name": "New Balance", "raw_domain": "http://www.newbalance.fr/fr/home",
+    }
 
 
 def test_structure_inconnue_leve_une_erreur_explicite():
