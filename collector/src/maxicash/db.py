@@ -118,7 +118,7 @@ def latest_snapshot(
             f"SELECT {fields} FROM offer_snapshot"
             " WHERE merchant_alias_id = %s AND kind = %s"
             "   AND category_label IS NOT DISTINCT FROM %s"
-            " ORDER BY collected_at DESC LIMIT 1",
+            " ORDER BY collected_at DESC, id DESC LIMIT 1",
             (alias_id, offer.kind, offer.category_label),
         )
         return cur.fetchone()
@@ -196,10 +196,76 @@ def queue_review(conn: psycopg.Connection, kind: str, payload: dict) -> None:
         )
 
 
+def find_alias(conn: psycopg.Connection, provider_id: int, raw_slug: str) -> int | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM merchant_alias WHERE provider_id = %s AND raw_slug = %s",
+            (provider_id, raw_slug),
+        )
+        row = cur.fetchone()
+    return row["id"] if row else None
+
+
+def close_missing_offers(
+    conn: psycopg.Connection,
+    *,
+    alias_id: int,
+    provider_id: int,
+    run_id: int,
+    seen: set[tuple[str, str | None]],
+) -> int:
+    """Clôture les offres en cours absentes de la page lue à l'instant.
+
+    Une clôture est un INSERT (value NULL, même kind et category_label) : la
+    date de fin entre dans l'historique, et les vues cessent d'afficher
+    l'offre. Rend le nombre d'offres clôturées.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT ON (kind, COALESCE(category_label, ''))"
+            "       kind, category_label, unit, value"
+            " FROM offer_snapshot WHERE merchant_alias_id = %s"
+            " ORDER BY kind, COALESCE(category_label, ''), collected_at DESC, id DESC",
+            (alias_id,),
+        )
+        latest = cur.fetchall()
+    closed = 0
+    for row in latest:
+        if row["value"] is None or (row["kind"], row["category_label"]) in seen:
+            continue
+        insert_snapshot(
+            conn, alias_id=alias_id, provider_id=provider_id, run_id=run_id,
+            offer=RawOffer(
+                raw_text="offre absente de la page",
+                value=None, unit=row["unit"], kind=row["kind"],
+                category_label=row["category_label"],
+            ),
+        )
+        closed += 1
+    return closed
+
+
 def refresh_current(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY offer_current")
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY offer_current_all")
     conn.commit()
+
+
+def publish_merchants_with_offers(conn: psycopg.Connection) -> int:
+    """Publie tout marchand ayant au moins une offre en cours, quel qu'en soit
+    le type. Ne dépublie jamais : une page indexée qui disparaît perd son
+    référencement ; une page sans offre du moment reste utile (historique)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE merchant SET is_published = TRUE"
+            " WHERE NOT is_published"
+            "   AND id IN (SELECT merchant_id FROM offer_current_all"
+            "              WHERE merchant_id IS NOT NULL)"
+        )
+        count = cur.rowcount
+    conn.commit()
+    return count
 
 
 def previous_offer_count(conn: psycopg.Connection, provider_id: int) -> int | None:

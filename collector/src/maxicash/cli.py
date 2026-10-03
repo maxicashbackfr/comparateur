@@ -138,6 +138,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                 # mettre en file de validation la noierait à chaque passe : on
                 # le compte seulement. Une page illisible, elle, lève une erreur.
                 empty += 1
+                # S'il avait des offres à la passe précédente, elles ont pris fin.
+                known_alias = db.find_alias(conn, provider_id, merchant.raw_slug)
+                if known_alias:
+                    db.touch_alias(conn, known_alias)
+                    offers_written += db.close_missing_offers(
+                        conn, alias_id=known_alias, provider_id=provider_id,
+                        run_id=run_id, seen=set(),
+                    )
+                    conn.commit()
                 continue
 
             # Nom affiché et site du marchand, lus sur la page : meilleurs que
@@ -155,6 +164,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                     run_id=run_id, offer=offer,
                 ):
                     offers_written += 1
+            offers_written += db.close_missing_offers(
+                conn, alias_id=alias_id, provider_id=provider_id, run_id=run_id,
+                seen={(o.kind, o.category_label) for o in offers},
+            )
             conn.commit()
 
         status = "ok" if errors == 0 else ("partial" if offers_found else "failed")
@@ -176,11 +189,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Rattache les nouveaux alias à un marchand unique : sans cela, la
         # comparaison entre plateformes reste vide.
         match_aliases(conn)
-
-        try:
-            db.refresh_current(conn)
-        except Exception:
-            pass  # la vue n'existe pas encore au tout premier run
+        refresh_and_publish(conn)
 
     console.print(
         f"[green]Terminé.[/] {urls_fetched} pages, {offers_found} offres lues, "
@@ -244,11 +253,17 @@ def cmd_match(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
     with db.connect(settings) as conn:
         match_aliases(conn)
-        try:
-            db.refresh_current(conn)
-        except Exception:
-            pass
+        refresh_and_publish(conn)
     return 0
+
+
+def refresh_and_publish(conn) -> None:
+    """Rafraîchit les vues d'état courant, puis publie les marchands qui ont
+    au moins une offre en cours. Ne fait jamais l'inverse."""
+    db.refresh_current(conn)
+    published = db.publish_merchants_with_offers(conn)
+    if published:
+        console.print(f"Publication : {published} marchands publiés.")
 
 
 def cmd_status(args: argparse.Namespace) -> int:
