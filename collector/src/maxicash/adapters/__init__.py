@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .ebuyclub import EbuyclubAdapter
 from .widilo import WidiloAdapter
 
 REGISTRY: dict[str, Callable] = {
     WidiloAdapter.slug: WidiloAdapter,
+    EbuyclubAdapter.slug: EbuyclubAdapter,
 }
 
 

@@ -157,7 +157,7 @@ class WidiloAdapter:
     # -- lecture d'une page ---------------------------------------------------
 
     @staticmethod
-    def merchant_details(html: str) -> dict[str, str | None]:
+    def merchant_details(merchant: RawMerchant | None, html: str) -> dict[str, str | None]:
         """Nom affiché (« New Balance », plus fiable que le slug) et site du
         marchand (« http://www.newbalance.fr/fr/home »), clé d'appariement."""
         try:

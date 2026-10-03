@@ -75,6 +75,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
 PAGE_URLS = {
     "widilo": "https://www.widilo.fr/code-promo/{slug}",
     "igraal": "https://fr.igraal.com/codes-promo/{slug}",
+    "ebuyclub": "https://www.ebuyclub.com/reduction-{slug}",   # slug = <nom>-<id>
 }
 
 
@@ -122,7 +123,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     with db.connect(settings) as conn, PoliteClient(settings) as client:
         adapter = get_adapter(args.provider, client.get)
         provider_id = db.upsert_provider(
-            conn, adapter.slug, adapter.slug.capitalize(), adapter.base_url
+            conn, adapter.slug, getattr(adapter, "display_name", adapter.slug.capitalize()),
+            adapter.base_url,
         )
         run_id = db.start_run(conn, provider_id)
         previous = db.previous_offer_count(conn, provider_id)
@@ -178,7 +180,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             # Nom affiché et site du marchand, lus sur la page : meilleurs que
             # le slug du sitemap, et le domaine sert à l'appariement.
             details_of = getattr(adapter, "merchant_details", None)
-            details = {k: v for k, v in (details_of(html) if details_of else {}).items() if v}
+            details = {
+                k: v for k, v in (details_of(merchant, html) if details_of else {}).items() if v
+            }
             if details:
                 merchant = replace(merchant, **details)
 

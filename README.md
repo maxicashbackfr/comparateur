@@ -56,7 +56,7 @@ trafic, jamais toute l'autorité acquise.
 | Commande | Effet |
 |---|---|
 | `maxicash migrate` | applique les migrations, idempotent |
-| `maxicash discover widilo` | énumère les marchands via le sitemap |
+| `maxicash discover widilo` | énumère les marchands via le sitemap (idem `ebuyclub`) |
 | `maxicash snapshot widilo fnac` | fige une page réelle en fixture de test |
 | `maxicash snapshot igraal <URL> <URL>…` | idem par URL complète, même sans adaptateur |
 | `maxicash run widilo --limit 20` | collecte, écrit en base, puis apparie |
@@ -84,6 +84,19 @@ make test
 ```
 
 Tant que les tests sont rouges, aucune collecte ne doit tourner.
+
+## Plateformes
+
+| Plateforme | Adaptateur | Source des données | Remarque |
+|---|---|---|---|
+| Widilo | `widilo` | JSON `ng-state` (Angular) | domaine marchand fourni |
+| eBuyClub | `ebuyclub` | charge utile Next.js `__next_f` | pas de domaine : appariement par nom ; ~3 200 pages au sitemap |
+| iGraal | — | — | 403 au collecteur (03/10/2026), y compris depuis GitHub Actions |
+| Poulpeo | — | — | 403, même sur robots.txt (03/10/2026) |
+| Joko | — | — | non étudié |
+
+Pour figer des pages sans accès réseau local : workflow GitHub **Snapshot**
+(onglet Actions → Snapshot → Run workflow), qui commite les fixtures sur main.
 
 ## Ce que la collecte respecte
 
