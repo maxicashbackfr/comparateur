@@ -3,6 +3,7 @@
     maxicash migrate                     applique les migrations
     maxicash discover widilo             énumère les marchands via le sitemap
     maxicash snapshot widilo fnac        fige une page réelle en fixture de test
+    maxicash snapshot igraal URL…        idem par URL, même sans adaptateur
     maxicash run widilo --limit 20       collecte et écrit en base (puis apparie)
     maxicash match                       rattache les alias à un marchand unique
     maxicash status                      dernières passes et fraîcheur
@@ -68,25 +69,50 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+# Gabarit d'URL des pages marchands, par plateforme. Sert à `snapshot`, qui
+# doit pouvoir figer des pages AVANT que l'adaptateur existe : c'est avec elles
+# qu'on l'écrit.
+PAGE_URLS = {
+    "widilo": "https://www.widilo.fr/code-promo/{slug}",
+    "igraal": "https://fr.igraal.com/codes-promo/{slug}",
+}
+
+
 def cmd_snapshot(args: argparse.Namespace) -> int:
-    """Fige une page réelle en fixture. C'est ce qui transforme une casse de DOM
-    en test rouge plutôt qu'en données silencieusement fausses."""
+    """Fige des pages réelles en fixtures. C'est ce qui transforme une casse de
+    structure en test rouge plutôt qu'en données silencieusement fausses.
+
+    Accepte des slugs (« fnac ») ou des URL complètes copiées du navigateur."""
     settings = Settings.from_env()
     target = FIXTURES_DIR / args.provider
     target.mkdir(parents=True, exist_ok=True)
+    template = PAGE_URLS.get(args.provider)
+    status = 0
     with PoliteClient(settings, use_cache=False) as client:
-        adapter = get_adapter(args.provider, client.get)
-        url = f"{adapter.base_url}/code-promo/{args.slug}"
-        try:
-            html = client.get(url)
-        except RobotsDisallowed as exc:
-            console.print(f"[red]{exc}[/]")
-            return 2
-    path = target / f"{args.slug}.html"
-    path.write_text(html, encoding="utf-8")
-    console.print(f"[green]Fixture écrite :[/] {path} ({len(html):,} octets)")
-    console.print("[dim]Ajoutez un test dans tests/test_<plateforme>.py, puis : pytest -q[/]")
-    return 0
+        for item in args.pages:
+            if item.startswith(("http://", "https://")):
+                url = item
+                slug = urlsplit(item).path.rstrip("/").rsplit("/", 1)[-1] or "page"
+            elif template:
+                url, slug = template.format(slug=item), item
+            else:
+                console.print(f"[red]Plateforme inconnue : {args.provider}. "
+                              "Donnez l'URL complète de la page.[/]")
+                return 2
+            try:
+                html = client.get(url)
+            except RobotsDisallowed as exc:
+                console.print(f"[red]{exc}[/]")
+                status = 2
+                continue
+            except Exception as exc:
+                console.print(f"[red]{url} : {exc}[/]")
+                status = 1
+                continue
+            path = target / f"{slug}.html"
+            path.write_text(html, encoding="utf-8")
+            console.print(f"[green]Fixture écrite :[/] {path} ({len(html):,} octets)")
+    return status
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -302,9 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_discover)
 
-    p = sub.add_parser("snapshot", help="fige une page réelle en fixture")
+    p = sub.add_parser("snapshot", help="fige des pages réelles en fixtures")
     p.add_argument("provider")
-    p.add_argument("slug")
+    p.add_argument("pages", nargs="+", help="slugs ou URL complètes")
     p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("run", help="collecte et écrit en base")

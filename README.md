@@ -58,6 +58,7 @@ trafic, jamais toute l'autorité acquise.
 | `maxicash migrate` | applique les migrations, idempotent |
 | `maxicash discover widilo` | énumère les marchands via le sitemap |
 | `maxicash snapshot widilo fnac` | fige une page réelle en fixture de test |
+| `maxicash snapshot igraal <URL> <URL>…` | idem par URL complète, même sans adaptateur |
 | `maxicash run widilo --limit 20` | collecte, écrit en base, puis apparie |
 | `maxicash match` | rattache les alias à un marchand unique (domaine, puis nom) |
 | `maxicash status` | dernières passes, fraîcheur, erreurs |
