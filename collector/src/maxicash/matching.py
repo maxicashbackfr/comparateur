@@ -171,3 +171,66 @@ def unique_slug(name: str, taken: set[str]) -> str:
     while slug in taken:
         slug, n = f"{base}-{n}", n + 1
     return slug
+
+
+# --- Liste prioritaire (pool de candidats MVP) --------------------------------
+
+PRIORITIES = ("P1", "P2", "P3")
+
+
+def compact(text: str) -> str:
+    """« 1001 Pneus », « 1001pneus », « 1001-pneus » → « 1001pneus »."""
+    return normalize_name(text).replace(" ", "")
+
+
+@dataclass(frozen=True)
+class Target:
+    """Un marchand de la liste prioritaire."""
+    slug: str
+    name: str
+    priority: str
+
+
+def wanted(raw_name: str, raw_slug: str, targets: list[Target]) -> Target | None:
+    """Ce marchand de plateforme est-il dans la liste prioritaire ?
+
+    Sert à filtrer le sitemap AVANT de télécharger les pages : on compare donc
+    seulement le nom et le slug de plateforme (le domaine n'est connu qu'une
+    fois la page lue). Forme compacte identique, ou nom très proche.
+    L'appariement fin se fait ensuite, page lue, par `decide`.
+    """
+    keys = {compact(raw_name), compact(raw_slug)}
+    for t in targets:
+        if compact(t.name) in keys or compact(t.slug) in keys:
+            return t
+    best, score = None, 0.0
+    for t in targets:
+        s = similarity(raw_name, t.name)
+        if s > score:
+            best, score = t, s
+    return best if score >= FUZZY_THRESHOLD else None
+
+
+def parse_seed_csv(text: str) -> list[dict]:
+    """Lit l'export CSV de la feuille « MaxiCash — Marchands, pool de candidats
+    MVP » (colonnes Slug, Marchand, Domaine, Categorie, Prio, Volume…)."""
+    import csv
+    import io
+
+    rows = []
+    for raw in csv.DictReader(io.StringIO(text.lstrip("﻿"))):
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+        slug, name = row.get("slug"), row.get("marchand")
+        if not slug or not name:
+            continue
+        prio = row.get("prio", "").upper()
+        volume = row.get("volume", "").replace(" ", "").replace(" ", "")
+        rows.append({
+            "slug": slugify(slug),
+            "name": name,
+            "domain": domain_key(row.get("domaine")) or (row.get("domaine") or None),
+            "category": row.get("categorie") or None,
+            "priority": prio if prio in PRIORITIES else None,
+            "search_volume": int(volume) if volume.isdigit() else None,
+        })
+    return rows

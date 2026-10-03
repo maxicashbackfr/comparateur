@@ -89,3 +89,41 @@ def test_une_plateforme_ne_se_rattache_pas_deux_fois_par_le_nom():
 def test_unique_slug_evite_les_collisions():
     assert unique_slug("New Balance FR", set()) == "new-balance"
     assert unique_slug("Fnac", {"fnac", "fnac-2"}) == "fnac-3"
+
+
+# --- liste prioritaire --------------------------------------------------------
+
+from maxicash.matching import Target, parse_seed_csv, wanted  # noqa: E402
+
+SEED = (
+    "﻿Slug,Marchand,Domaine,Categorie,Prio,Lot,Volume,Plateformes,Score,Note\r\n"
+    "fnac,Fnac,fnac.com,High-tech & électroménager,P1,L3a,,,0,\"Taux différencié, marketplace\"\r\n"
+    "1001pneus,1001Pneus,1001pneus.fr,Auto & moto,P3,L3c,12 000,,0,\r\n"
+    "caudalie,Caudalie,fr.caudalie.com,Beauté & parfum,P3,L3c,,,0,\r\n"
+    "e-leclerc,E.Leclerc,e.leclerc,Alimentaire & courses,P2,L3b,,,0,\r\n"
+    ",ligne vide,,,,,,,,\r\n"
+)
+
+
+def test_parse_seed_csv_lit_l_export_google_sheets():
+    rows = {r["slug"]: r for r in parse_seed_csv(SEED)}
+    assert set(rows) == {"fnac", "1001pneus", "caudalie", "e-leclerc"}
+    assert rows["fnac"]["priority"] == "P1" and rows["fnac"]["domain"] == "fnac.com"
+    assert rows["caudalie"]["domain"] == "caudalie.com"        # domaine enregistrable
+    assert rows["1001pneus"]["search_volume"] == 12000
+    assert rows["e-leclerc"]["domain"] == "e.leclerc"
+
+
+TARGETS = [Target("fnac", "Fnac", "P1"), Target("1001pneus", "1001Pneus", "P3"),
+           Target("la-redoute", "La Redoute", "P1")]
+
+
+def test_wanted_reconnait_les_variantes_de_slug():
+    assert wanted("1001 Pneus", "1001-pneus-7016", TARGETS).slug == "1001pneus"
+    assert wanted("Fnac", "fnac-58", TARGETS).slug == "fnac"
+    assert wanted("La Redoute", "la-redoute", TARGETS).slug == "la-redoute"
+
+
+def test_wanted_ignore_les_marchands_hors_liste():
+    assert wanted("1001 Bijoux", "1001-bijoux-2837", TARGETS) is None
+    assert wanted("Fnac Belgique", "fnac-belgique-10", TARGETS) is None

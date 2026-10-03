@@ -6,6 +6,8 @@
     maxicash snapshot igraal URL…        idem par URL, même sans adaptateur
     maxicash run widilo --limit 20       collecte et écrit en base (puis apparie)
     maxicash match                       rattache les alias à un marchand unique
+    maxicash seed marchands.csv          importe la liste prioritaire
+    maxicash run ebuyclub --priority P1  ne collecte que la liste prioritaire
     maxicash status                      dernières passes et fraîcheur
 """
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from rich.console import Console
@@ -138,6 +141,25 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             console.print(f"[red]Énumération impossible :[/] {exc}")
             return 1
+
+        if args.priority:
+            targets = db.load_targets(conn, args.priority)
+            if not targets:
+                console.print("[red]Aucun marchand prioritaire en base : lancez d'abord "
+                              "`maxicash seed <fichier.csv>`.[/]")
+                db.finish_run(conn, run_id, status="failed", urls_fetched=0, offers_found=0,
+                              offers_written=0, errors_count=1, notes="liste prioritaire vide")
+                return 1
+            linked = db.aliases_of_targets(conn, provider_id, args.priority)
+            total = len(merchants)
+            merchants = [
+                m for m in merchants
+                if m.raw_slug in linked or matching.wanted(m.raw_name, m.raw_slug, targets)
+            ]
+            console.print(
+                f"Liste prioritaire ≤ {args.priority} : {len(merchants)} pages retenues "
+                f"sur {total} ({len(targets)} marchands visés)."
+            )
 
         if args.limit:
             merchants = merchants[: args.limit]
@@ -296,6 +318,25 @@ def refresh_and_publish(conn) -> None:
         console.print(f"Publication : {published} marchands publiés.")
 
 
+def cmd_seed(args: argparse.Namespace) -> int:
+    """Importe la liste prioritaire exportée en CSV depuis Google Sheets."""
+    rows = matching.parse_seed_csv(Path(args.csv_path).read_text(encoding="utf-8"))
+    if not rows:
+        console.print("[red]Aucune ligne lisible (colonnes attendues : Slug, Marchand, "
+                      "Domaine, Categorie, Prio).[/]")
+        return 1
+    settings = Settings.from_env()
+    with db.connect(settings) as conn:
+        counts = db.seed_merchants(conn, rows)
+    by_prio = {p: sum(r["priority"] == p for r in rows) for p in matching.PRIORITIES}
+    console.print(
+        f"[green]Liste importée :[/] {counts['created']} marchands créés, "
+        f"{counts['updated']} complétés ({by_prio['P1']} P1, {by_prio['P2']} P2, "
+        f"{by_prio['P3']} P3)."
+    )
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     settings = Settings.from_env()
     table = Table(title="Dernières passes")
@@ -340,6 +381,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="collecte et écrit en base")
     p.add_argument("provider")
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--priority", choices=matching.PRIORITIES,
+                   help="ne collecter que la liste prioritaire, jusqu'à ce niveau inclus")
+
+    p = sub.add_parser("seed", help="importe la liste prioritaire (CSV)")
+    p.add_argument("csv_path")
+    p.set_defaults(func=cmd_seed)
     p.set_defaults(func=cmd_run)
 
     sub.add_parser("match", help="rattache les alias à un marchand unique").set_defaults(

@@ -61,6 +61,8 @@ trafic, jamais toute l'autorité acquise.
 | `maxicash snapshot igraal <URL> <URL>…` | idem par URL complète, même sans adaptateur |
 | `maxicash run widilo --limit 20` | collecte, écrit en base, puis apparie |
 | `maxicash match` | rattache les alias à un marchand unique (domaine, puis nom) |
+| `maxicash seed ../db/seeds/marchands.csv` | importe la liste prioritaire (363 marchands, P1 à P3) |
+| `maxicash run ebuyclub --priority P3` | ne collecte que les marchands de la liste, jusqu'à P3 inclus |
 | `maxicash status` | dernières passes, fraîcheur, erreurs |
 
 ## Comment l'adaptateur Widilo lit une page
@@ -94,6 +96,11 @@ Tant que les tests sont rouges, aucune collecte ne doit tourner.
 | iGraal | — | — | 403 au collecteur (03/10/2026), y compris depuis GitHub Actions |
 | Poulpeo | — | — | 403, même sur robots.txt (03/10/2026) |
 | Joko | — | — | non étudié |
+
+La liste prioritaire vient de la feuille « MaxiCash — Marchands, pool de
+candidats MVP » (Drive), exportée dans `db/seeds/marchands.csv`. Sur eBuyClub,
+elle retient 304 pages sur 3 197 (299 marchands couverts, dont 48 des 49 P1) :
+une passe complète tombe d'environ 2 h 40 à 15 minutes.
 
 Pour figer des pages sans accès réseau local : workflow GitHub **Snapshot**
 (onglet Actions → Snapshot → Run workflow), qui commite les fixtures sur main.

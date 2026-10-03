@@ -43,11 +43,23 @@ class PoliteClient:
             parser.set_url(f"{host}/robots.txt")
             try:
                 response = self._client.get(f"{host}/robots.txt")
-                parser.parse(response.text.splitlines())
             except httpx.HTTPError:
                 # robots.txt injoignable : on se comporte comme s'il interdisait
                 # tout. Le silence n'est pas une autorisation.
                 parser.disallow_all = True
+            else:
+                # Mêmes règles que la bibliothèque standard : 401/403 = accès
+                # refusé, donc tout est interdit ; autre 4xx = pas de fichier,
+                # donc rien n'est interdit ; 5xx = on ne sait pas, on s'abstient.
+                # Sans ce tri, une page d'erreur 403 était lue comme un
+                # robots.txt vide, c'est-à-dire comme une autorisation.
+                status = response.status_code
+                if status in (401, 403) or status >= 500:
+                    parser.disallow_all = True
+                elif status >= 400:
+                    parser.allow_all = True
+                else:
+                    parser.parse(response.text.splitlines())
             self._robots[host] = parser
         return self._robots[host]
 

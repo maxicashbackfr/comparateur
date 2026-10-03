@@ -12,7 +12,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .config import MIGRATIONS_DIR, Settings
-from .matching import KnownMerchant
+from .matching import PRIORITIES, KnownMerchant, Target
 from .normalize import COMPARED_FIELDS, same_offer
 from .types import RawMerchant, RawOffer
 
@@ -349,3 +349,70 @@ def queue_review_once(conn: psycopg.Connection, kind: str, payload: dict) -> boo
             return False
     queue_review(conn, kind, payload)
     return True
+
+
+# --- liste prioritaire -------------------------------------------------------
+
+def seed_merchants(conn: psycopg.Connection, rows: list[dict]) -> dict[str, int]:
+    """Importe la liste prioritaire dans `merchant`.
+
+    Un marchand déjà créé par l'appariement est retrouvé par domaine, puis par
+    slug, et complété (priorité, catégorie, volume, nom soigné) sans changer
+    son slug. Les autres sont créés, non publiés : ils le seront à leur
+    première offre. Rien n'est supprimé.
+    """
+    counts = {"created": 0, "updated": 0}
+    with conn.cursor() as cur:
+        for row in rows:
+            cur.execute(
+                "SELECT id FROM ("
+                "  SELECT id, 0 AS rank FROM merchant WHERE canonical_domain = %s"
+                "  UNION ALL SELECT id, 1 FROM merchant WHERE slug = %s"
+                ") found ORDER BY rank LIMIT 1",
+                (row["domain"], row["slug"]),
+            )
+            found = cur.fetchone()
+            if found:
+                cur.execute(
+                    "UPDATE merchant SET name = %s, category = %s, priority = %s,"
+                    " search_volume = COALESCE(%s, search_volume),"
+                    " canonical_domain = COALESCE(canonical_domain, %s)"
+                    " WHERE id = %s",
+                    (row["name"], row["category"], row["priority"], row["search_volume"],
+                     row["domain"], found["id"]),
+                )
+                counts["updated"] += 1
+            else:
+                cur.execute(
+                    "INSERT INTO merchant (slug, name, canonical_domain, category, priority,"
+                    " search_volume) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (row["slug"], row["name"], row["domain"], row["category"],
+                     row["priority"], row["search_volume"]),
+                )
+                counts["created"] += 1
+    conn.commit()
+    return counts
+
+
+def load_targets(conn: psycopg.Connection, max_priority: str) -> list[Target]:
+    """Marchands de priorité P1..max_priority (P2 inclut P1, etc.)."""
+    allowed = list(PRIORITIES[: PRIORITIES.index(max_priority) + 1])
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT slug, name, priority FROM merchant WHERE priority = ANY(%s)"
+            " ORDER BY priority, slug",
+            (allowed,),
+        )
+        return [Target(r["slug"], r["name"], r["priority"]) for r in cur.fetchall()]
+
+
+def aliases_of_targets(conn: psycopg.Connection, provider_id: int, max_priority: str) -> set[str]:
+    """raw_slug des alias déjà rattachés à un marchand prioritaire."""
+    allowed = list(PRIORITIES[: PRIORITIES.index(max_priority) + 1])
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT a.raw_slug FROM merchant_alias a JOIN merchant m ON m.id = a.merchant_id"
+            " WHERE a.provider_id = %s AND m.priority = ANY(%s)",
+            (provider_id, allowed),
+        )
+        return {r["raw_slug"] for r in cur.fetchall()}
