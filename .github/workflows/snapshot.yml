@@ -41,8 +41,12 @@ jobs:
         env:
           PROVIDER: ${{ inputs.provider }}
           PAGES: ${{ inputs.pages }}
-        # PAGES non cité : volontairement découpé sur les espaces.
-        run: python -m maxicash.cli snapshot "$PROVIDER" $PAGES || true
+        # PAGES non cité : volontairement découpé sur les espaces. La sortie
+        # est aussi émise en annotations, lisibles sans accès aux journaux.
+        run: |
+          COLUMNS=200 python -m maxicash.cli snapshot "$PROVIDER" $PAGES > out.txt 2>&1 || true
+          cat out.txt
+          while IFS= read -r line; do [ -n "$line" ] && echo "::notice::$line"; done < out.txt
 
       - name: Commiter les fixtures
         env:
