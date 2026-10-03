@@ -1,0 +1,59 @@
+name: Snapshot
+
+# Fige des pages réelles d'une plateforme en fixtures de test, depuis un
+# runner GitHub (accès Internet), et les commite sur main. Sert à écrire ou
+# réparer un adaptateur. Même client poli que la collecte : robots.txt
+# respecté, une requête toutes les 3 s, User-Agent identifié.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Plateforme (widilo, igraal…)"
+        required: true
+      pages:
+        description: "Slugs ou URL complètes, séparés par des espaces"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      MAXICASH_USER_AGENT: MaxiCashBot/0.1 (+https://maxicash.fr/bot)
+      MAXICASH_MIN_DELAY: "3.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer le collecteur
+        working-directory: collector
+        run: python -m pip install -e .
+
+      - name: Figer les pages
+        working-directory: collector
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          PAGES: ${{ inputs.pages }}
+        # PAGES non cité : volontairement découpé sur les espaces.
+        run: python -m maxicash.cli snapshot "$PROVIDER" $PAGES || true
+
+      - name: Commiter les fixtures
+        env:
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "collector/tests/fixtures/$PROVIDER"
+          if git diff --cached --quiet; then
+            echo "Aucune page figée."; exit 1
+          fi
+          git commit -m "Fixtures $PROVIDER (workflow Snapshot)"
+          git pull --rebase
+          git push
